@@ -1,0 +1,7 @@
+{
+  "embedding_model": "BAAI/bge-small-zh-v1.5",
+  "chunk_count": 20,
+  "embedding_dim": 512,
+  "embeddings_path": "D:\\Dev\\PythonWorkspace\\embeddings.npy",
+  "chunks_path": "D:\\Dev\\PythonWorkspace\\chunks_embedded.json"
+}
