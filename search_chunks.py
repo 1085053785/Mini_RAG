@@ -3,12 +3,14 @@ from pathlib import Path
 from rank_bm25 import BM25Okapi
 import numpy as np
 from sentence_transformers import SentenceTransformer
+from sentence_transformers import CrossEncoder
 import jieba
 
 
 EMBEDDINGS_PATH = Path(r"D:\Dev\PythonWorkspace\documents\embeddings.npy")
 CHUNKS_PATH = Path(r"D:\Dev\PythonWorkspace\documents\chunks_embedded.json")
 
+RERANKER_MODEL_PATH = r"D:\Dev\PythonWorkspace\models\bge-reranker-v2-m3"
 MODEL_NAME = r"D:\Dev\PythonWorkspace\models\models--BAAI--bge-small-zh-v1.5\snapshots\7999e1d3359715c523056ef9478215996d62a620"
 
 
@@ -121,25 +123,91 @@ def rrf_fusion(vector_results, bm25_results, final_k=3, rrf_k=60):
 
     return results[:final_k]
 
+def rerank(query, candidates, reranker, final_k=3):
+    pairs = []
+    for candidate in candidates:
+        chunk_text = candidate["chunk"]["text"]
+        pairs.append([query, chunk_text])
+
+    rerank_scores = reranker.predict(pairs)
+    rerank_list = []
+    for i,result in enumerate(candidates):
+        rerank_list.append({
+            "chunk": result["chunk"],
+            "rerank_score": float(rerank_scores[i]),
+            "rrf_score": result["score"],
+            "index": i
+        })
+    results = sorted(rerank_list, key=lambda x: x["rerank_score"], reverse=True) 
+
+    return results[:final_k]
+
+def retrieve(query,
+    embeddings,
+    chunks,
+    embedding_model,
+    bm25,
+    reranker,
+    vector_top_k=5,
+    bm25_top_k=5,
+    fusion_top_k=5,
+    final_k=3):
+    vector_results = vector_search(
+        query,
+        embeddings,
+        chunks,
+        embedding_model,
+        top_k=vector_top_k
+    )
+
+    bm25_results = bm25_search(
+        query,
+        bm25,
+        chunks,
+        top_k=bm25_top_k
+    )
+
+    rrf_results = rrf_fusion(
+        vector_results,
+        bm25_results,
+        final_k=fusion_top_k,
+        rrf_k=60
+    )
+
+    final_results = rerank(
+        query,
+        rrf_results,
+        reranker,
+        final_k=final_k
+    )
+
+    return final_results
+
+
 def main():
     model = SentenceTransformer(MODEL_NAME)
     embeddings = load_embeddings(EMBEDDINGS_PATH)
     chunks = load_chunks(CHUNKS_PATH)
+    if len(embeddings) != len(chunks):
+        raise ValueError(
+            f"Embedding 数量 {len(embeddings)} "
+            f"与 Chunk 数量 {len(chunks)} 不一致"
+        )
     bm25 = build_bm25_index(chunks)
+    reranker = CrossEncoder(RERANKER_MODEL_PATH,max_length=1024)
 
     print("embedding shape:", embeddings.shape)
     print("chunk 数量:", len(chunks))
 
     query = input("请输入查询内容：")
 
-    vector_results = vector_search(query, embeddings, chunks, model, top_k=5)
-    bm25_results = bm25_search(query, bm25, chunks, top_k=5)
-    results = rrf_fusion(vector_results, bm25_results, final_k=3, rrf_k=60)
+    final_results = retrieve(query,embeddings,chunks,model,bm25,reranker,vector_top_k=5,bm25_top_k=5,fusion_top_k=5,final_k=3)
 
-    for i, result in enumerate(results, start=1):
+    for i, result in enumerate(final_results, start=1):
         print("=" * 50)
         print("排名：", i)
-        print("RRF 分数：", result["score"])
+        print("ReRank 分数：", result["rerank_score"])
+        print("RRF 分数：", result["rrf_score"])
         print("内容：")
         print(result["chunk"]["text"])
 

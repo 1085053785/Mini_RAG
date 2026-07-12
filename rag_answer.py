@@ -1,13 +1,16 @@
-from search_chunks import search, load_embeddings, load_chunks
+from search_chunks import load_embeddings, load_chunks, build_bm25_index, retrieve
 from pathlib import Path
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
+from sentence_transformers import SentenceTransformer
+from sentence_transformers import CrossEncoder
 
 
 EMBEDDINGS_PATH = Path(r"D:\Dev\PythonWorkspace\documents\embeddings.npy")
 CHUNKS_PATH = Path(r"D:\Dev\PythonWorkspace\documents\chunks_embedded.json")
 MODEL_NAME = r"D:\Dev\PythonWorkspace\models\models--BAAI--bge-small-zh-v1.5\snapshots\7999e1d3359715c523056ef9478215996d62a620"
 LLM_MODEL_PATH = r"D:\Dev\PythonWorkspace\models\Qwen2.5-0.5B-Instruct"
+RERANKER_MODEL_PATH = r"D:\Dev\PythonWorkspace\models\bge-reranker-v2-m3"
 MIN_SCORE = 0.45
 
 
@@ -116,6 +119,9 @@ def main():
     tokenizer, model, device = load_llm()
     embeddings = load_embeddings(EMBEDDINGS_PATH)
     chunks = load_chunks(CHUNKS_PATH)
+    model_embed = SentenceTransformer(MODEL_NAME)
+    reranker = CrossEncoder(RERANKER_MODEL_PATH,max_length=1024)
+    bm25 = build_bm25_index(chunks)
     
     while True:
         print("=" * 100)
@@ -123,8 +129,9 @@ def main():
         if query.lower() == "q":
             break
 
-        results = search(query, embeddings, chunks, MODEL_NAME, top_k=3)
-        top_score = results[0]["score"]
+        final_results = retrieve(query=query,embeddings=embeddings,chunks=chunks,embedding_model=model_embed,bm25=bm25,reranker=reranker,vector_top_k=5,bm25_top_k=5,fusion_top_k=5,final_k=3)
+
+        top_score = final_results[0]["rerank_score"]
         if top_score < MIN_SCORE:
             print("回答：")
             print("资料中没有提到。")
@@ -132,7 +139,7 @@ def main():
             print(f"最高相似度：{top_score}")
             continue
 
-        context = build_context(results)
+        context = build_context(final_results)
         answer = ask_llm(context, query, tokenizer, model, device)
         answer = check_answer(answer)
 
@@ -140,14 +147,14 @@ def main():
         print("=" * 50)
         print("参考来源：")
 
-        for i, result in enumerate(results, start=1):
+        for i, result in enumerate(final_results, start=1):
             chunk = result["chunk"]
             metadata = chunk.get("metadata", {})
 
             source = metadata.get("source", "未知来源")
             chunk_id = metadata.get("chunk_id", "未知编号")
 
-            print(f"[{i}] 来源：{source}，chunk_id：{chunk_id}，相似度：{result['score']}")
+            print(f"[{i}] 来源：{source}，chunk_id：{chunk_id}，相似度：{result['rerank_score']}")
             print(chunk["text"][:200])
             print()
 
