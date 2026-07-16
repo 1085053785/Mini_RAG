@@ -1,4 +1,7 @@
 def add_message(messages, role, content):
+    """
+    向短期记忆中追加一条消息。
+    """
     messages.append({
         "role": role,
         "content": content
@@ -6,22 +9,26 @@ def add_message(messages, role, content):
 
 
 def get_recent_messages(messages, max_turns=3):
+    """
+    返回最近 max_turns 轮对话。
+
+    一轮默认包含一条 user 消息和一条 assistant 消息。
+    """
     return messages[-max_turns * 2:]
 
 
-def format_history(messages):
-    history_lines = []
+def split_messages(messages, max_turns=3):
+    """
+    将消息拆分成：
+    1. 需要进入摘要的旧消息
+    2. 继续保留在短期记忆中的最近消息
+    """
+    keep_count = max_turns * 2
 
-    for message in messages:
-        if message["role"] == "user":
-            role_name = "用户"
-        elif message["role"] == "assistant":
-            role_name = "助手"
-        else:
-            role_name = message["role"]
+    if len(messages) <= keep_count:
+        return [], messages
 
-        history_lines.append(
-            f"{role_name}：{message['content']}"
-        )
+    old_messages = messages[:-keep_count]
+    recent_messages = messages[-keep_count:]
 
-    return "\n".join(history_lines)
+    return old_messages, recent_messages
